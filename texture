@@ -1,0 +1,91 @@
+#!/usr/bin/python
+
+"""
+===========================================================================
+:script: 'at.soc.automation.deploy_customer.py'
+===========================================================================
+
+    :module: at.soc.automation.deploy_customer
+    :platform: Unix, Windows
+    :synopsis: Wrapper script used to manage build stream and deploy stream
+    :moduleauthor: volkan demirel<volkan@socialfeels.com>
+
+The script accepts command line argument -u which is the name of customer
+
+The script can be called using the following command:
+* deploy_customer.py -u [customer_name]
+"""
+
+import argparse
+import json
+
+import at.soc
+from at.soc.automation.build_stream import BuildStream
+from at.utils.configuration import LogConfiguration, Configuration, CustomerConfiguration, StorageConfiguration
+
+if __name__ == '__main__':
+
+    """"This is the main script entry. You can call the script by using the following
+        command line arguments:
+            -c CUSTOMER_NAME, --customer_name CUSTOMER_NAME
+                    name of the customer
+    """
+
+    # parse the command line arguments
+    parser = argparse.ArgumentParser(description="open customer.conf file and customer deployment")
+    parser.add_argument('-u', '--user', help="name of the customer", required=True)
+    args = parser.parse_args()
+
+    # set environment variable
+    AZURE_STORAGE_ACCOUNT = 'AZURE_STORAGE_ACCOUNT'
+    AZURE_STORAGE_KEY = 'AZURE_STORAGE_KEY'
+    CUSTOMER_NAME = 'CUSTOMER_NAME'
+    CUSTOMER_CONFIG_FILE = 'CUSTOMER_CONFIG_FILE'
+    STREAM_NAME = 'STREAM_NAME'
+    STORAGE_CONTAINER_NAME = 'STORAGE_CONTAINER_NAME'
+    STORAGE_CUSTOMER_FOLDER = 'customers'
+    TEMP_FOLDER = 'TEMP_FOLDER'
+
+    CUSTOMER_NAME = args.user
+
+    #set configuration
+    config = Configuration(module=at.soc)
+    customer_config = CustomerConfiguration(module=at.soc, customer_name=CUSTOMER_NAME)
+
+    #log configuration
+    log_config = LogConfiguration(customer_name=CUSTOMER_NAME, \
+                                  azure_storage_account=config.get_config_from_env(AZURE_STORAGE_ACCOUNT), \
+                                  azure_storage_key=config.get_config_from_env(AZURE_STORAGE_KEY))
+    logger = log_config.get_logger()
+
+    #config storage account
+    storage_config = StorageConfiguration(storage_account = config.get_config_from_env(AZURE_STORAGE_ACCOUNT),
+                                          storage_key = config.get_config_from_env(AZURE_STORAGE_KEY))
+    #create container
+    storage_config.create_stream_container()
+
+    #set customer config file path
+    CUSTOMER_CONFIG_FILE = customer_config.get_customer_config_file()
+
+    #save customer config file to azure storage
+    storage_config.put_blob_file_to_storage(blob_folder=STORAGE_CUSTOMER_FOLDER+"/"+CUSTOMER_NAME+".conf",
+                                            file=CUSTOMER_CONFIG_FILE)
+    try:
+        # parse stream config json
+        with open(CUSTOMER_CONFIG_FILE) as data_file:
+            stream_data = json.load(data_file)
+    except Exception as e:
+        print(e)
+
+    # get stream names from customer config file
+    stream_list = [stream['streamName'] for stream in stream_data[0]['streams']]
+
+    # iterate over stream names
+    for stream in stream_list:
+
+        logger.info('{} cofiguration is started'.format(stream))
+
+        stream_config = BuildStream(customer_name=CUSTOMER_NAME, stream_name=stream)
+        stream_config.build_stream_config()
+
+        logger.info("finished")
